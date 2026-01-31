@@ -1,0 +1,18 @@
+import { Router } from 'express'
+import pharmacyRouter from './modules/pharmacy/routes'
+import labRouter from './modules/lab/routes'
+import hospitalRouter from './modules/hospital/routes'
+import diagnosticRouter from './modules/diagnostic/routes'
+import adminRouter from './modules/admin/routes'
+import corporateRouter from './modules/corporate/routes'
+
+const router = Router()
+
+router.use('/pharmacy', pharmacyRouter)
+router.use('/lab', labRouter)
+router.use('/hospital', hospitalRouter)
+router.use('/diagnostic', diagnosticRouter)
+router.use('/admin', adminRouter)
+router.use('/corporate', corporateRouter)
+
+export default router
