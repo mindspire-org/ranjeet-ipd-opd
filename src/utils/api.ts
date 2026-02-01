@@ -5,9 +5,7 @@ const isElectronUA =
   /Electron/i.test(navigator.userAgent || "");
 const baseURL =
   (import.meta as any).env?.VITE_API_URL ||
-  (isFile || isElectronUA
-    ? "http://127.0.0.1:4000/api"
-    : "http://127.0.0.1:4000/api");
+  (isFile || isElectronUA ? "http://127.0.0.1:4000/api" : "/api");
 
 function getToken(path?: string) {
   try {
@@ -2132,10 +2130,7 @@ export const hospitalApi = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
-  updateToken: (
-    id: string,
-    data: { discount?: number },
-  ) =>
+  updateToken: (id: string, data: { discount?: number }) =>
     api(`/hospital/tokens/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

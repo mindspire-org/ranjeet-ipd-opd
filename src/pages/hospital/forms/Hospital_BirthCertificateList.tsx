@@ -1,73 +1,171 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { hospitalApi } from '../../../utils/api'
-import Hospital_BirthCertificateForm from '../../../components/hospital/hospital_BirthCertificateForm'
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { hospitalApi } from "../../../utils/api";
+import Hospital_BirthCertificateForm from "../../../components/hospital/hospital_BirthCertificateForm";
+import Hospital_Modal from "../../../components/hospital/bed-management/Hospital_Modal";
 
-export default function Hospital_BirthCertificateList(){
-  const navigate = useNavigate()
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(1)
-  const [limit, setLimit] = useState(20)
-  const [total, setTotal] = useState(0)
-  const [rows, setRows] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+export default function Hospital_BirthCertificateList() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const [showModal, setShowModal] = useState(false)
-  const [encounterId, setEncounterId] = useState('')
-  const [docId, setDocId] = useState<string|undefined>(undefined)
+  const [showModal, setShowModal] = useState(false);
+  const [encounterId, setEncounterId] = useState("");
+  const [docId, setDocId] = useState<string | undefined>(undefined);
 
-  useEffect(()=>{ load() }, [page, limit])
+  const [infoModal, setInfoModal] = useState<null | {
+    title: string;
+    message: string;
+  }>(null);
+  const showInfoModal = (title: string, message: string) =>
+    setInfoModal({ title, message });
+  const [confirmState, setConfirmState] = useState<null | {
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>(null);
 
-  async function load(){
-    setLoading(true)
+  const pdfUrlRef = useRef<string | null>(null);
+  const pdfIframeRef = useRef<HTMLIFrameElement>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfDoc, setPdfDoc] = useState<null | { title: string; src: string }>(
+    null,
+  );
+
+  useEffect(() => {
+    load();
+  }, [page, limit]);
+
+  async function load() {
+    setLoading(true);
     try {
-      const res: any = await hospitalApi.listIpdBirthCertificates({ q, page, limit }).catch(()=>null)
-      if (res && Array.isArray(res.results)){
-        setRows(res.results)
-        setTotal(res.total||res.results.length||0)
-        return
+      const res: any = await hospitalApi
+        .listIpdBirthCertificates({ q, page, limit })
+        .catch(() => null);
+      if (res && Array.isArray(res.results)) {
+        setRows(res.results);
+        setTotal(res.total || res.results.length || 0);
+        return;
       }
-      const encs: any = await hospitalApi.listIPDAdmissions({ status: 'discharged', q, page, limit }).catch(()=>null)
-      const admissions = encs?.admissions||[]
-      const mapped = await Promise.all(admissions.map(async (e: any)=>{
-        try {
-          const bc: any = await hospitalApi.getIpdBirthCertificate(String(e._id)).catch(()=>null)
-          if (bc?.birthCertificate){
-            const c = bc.birthCertificate
-            return {
-              _id: c._id,
-              encounterId: String(e._id),
-              createdAt: c.createdAt || e.startAt,
-              motherName: c.motherName || (e.patientId?.fullName || ''),
-              mrNumber: c.mrNumber || e.patientId?.mrn,
-              phone: c.phone || e.patientId?.phoneNormalized,
-              dateOfBirth: c.dateOfBirth,
-              timeOfBirth: c.timeOfBirth,
+      const encs: any = await hospitalApi
+        .listIPDAdmissions({ status: "discharged", q, page, limit })
+        .catch(() => null);
+      const admissions = encs?.admissions || [];
+      const mapped = await Promise.all(
+        admissions.map(async (e: any) => {
+          try {
+            const bc: any = await hospitalApi
+              .getIpdBirthCertificate(String(e._id))
+              .catch(() => null);
+            if (bc?.birthCertificate) {
+              const c = bc.birthCertificate;
+              return {
+                _id: c._id,
+                encounterId: String(e._id),
+                createdAt: c.createdAt || e.startAt,
+                motherName: c.motherName || e.patientId?.fullName || "",
+                mrNumber: c.mrNumber || e.patientId?.mrn,
+                phone: c.phone || e.patientId?.phoneNormalized,
+                dateOfBirth: c.dateOfBirth,
+                timeOfBirth: c.timeOfBirth,
+              };
             }
-          }
+          } catch {}
+          return null;
+        }),
+      );
+      const rows = mapped.filter(Boolean) as any[];
+      setRows(rows);
+      setTotal(rows.length);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function sr(idx: number) {
+    return (page - 1) * limit + idx + 1;
+  }
+
+  async function openPdfDoc(title: string, url: string) {
+    setPdfDoc({ title, src: "" });
+    setPdfLoading(true);
+    try {
+      const token = ((): string => {
+        try {
+          return (
+            localStorage.getItem("hospital.token") ||
+            localStorage.getItem("token") ||
+            ""
+          );
+        } catch {
+          return "";
+        }
+      })();
+      const res = await fetch(url, {
+        headers: token
+          ? ({ Authorization: `Bearer ${token}` } as any)
+          : undefined,
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "Failed to load document");
+        setPdfDoc(null);
+        showInfoModal(
+          "Not Available",
+          String(txt || "").slice(0, 500) || "Failed to load document",
+        );
+        return;
+      }
+      const blob = await res.blob();
+      if (pdfUrlRef.current) {
+        try {
+          URL.revokeObjectURL(pdfUrlRef.current);
         } catch {}
-        return null
-      }))
-      const rows = mapped.filter(Boolean) as any[]
-      setRows(rows)
-      setTotal(rows.length)
-    } finally { setLoading(false) }
+      }
+      const objUrl = URL.createObjectURL(blob);
+      pdfUrlRef.current = objUrl;
+      setPdfDoc({ title, src: objUrl });
+    } catch (e: any) {
+      setPdfDoc(null);
+      showInfoModal("Failed", e?.message || "Failed to load PDF");
+    } finally {
+      setPdfLoading(false);
+    }
   }
 
-  function sr(idx: number){ return (page-1)*limit + idx + 1 }
-
-  function onDownloadPdf(id: string){
-    const isFile = typeof window !== 'undefined' && window.location?.protocol === 'file:'
-    const isElectronUA = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent || '')
-    const apiBase = (import.meta as any).env?.VITE_API_URL || ((isFile || isElectronUA) ? 'http://127.0.0.1:4000/api' : 'http://localhost:4000/api')
-    const url = `${apiBase}/hospital/ipd/forms/birth-certificates/${encodeURIComponent(id)}/print-pdf`
-    window.open(url, '_blank')
+  function onDownloadPdf(id: string) {
+    const isFile =
+      typeof window !== "undefined" && window.location?.protocol === "file:";
+    const isElectronUA =
+      typeof navigator !== "undefined" &&
+      /Electron/i.test(navigator.userAgent || "");
+    const apiBase =
+      (import.meta as any).env?.VITE_API_URL ||
+      (isFile || isElectronUA
+        ? "http://127.0.0.1:4000/api"
+        : "http://localhost:4000/api");
+    const url = `${apiBase}/hospital/ipd/forms/birth-certificates/${encodeURIComponent(id)}/print-pdf`;
+    openPdfDoc("Birth Certificate (PDF)", url);
   }
 
-  async function onDelete(id: string){
-    if (!confirm('Delete this form?')) return
-    try { await hospitalApi.deleteBirthCertificateById(id) } catch {}
-    load()
+  async function doDelete(id: string) {
+    try {
+      await hospitalApi.deleteBirthCertificateById(id);
+    } catch (e: any) {
+      showInfoModal("Failed", e?.message || "Failed to delete");
+    }
+    load();
+  }
+
+  async function onDelete(id: string) {
+    setConfirmState({
+      title: "Delete",
+      message: "Delete this form?",
+      onConfirm: () => doDelete(id),
+    });
   }
 
   // No patient prefill; manual entry in form
@@ -75,11 +173,41 @@ export default function Hospital_BirthCertificateList(){
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold text-slate-800">Birth Certificates</div>
+        <div className="text-lg font-semibold text-slate-800">
+          Birth Certificates
+        </div>
         <div className="flex items-center gap-2">
-          <input className="border rounded-md px-2 py-1 text-sm" placeholder="Search mother / MRN / phone" value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{ if (e.key==='Enter') { setPage(1); load() } }} />
-          <button className="btn-outline-navy text-sm" onClick={()=>{ setPage(1); load() }} disabled={loading}>Search</button>
-          <button className="btn text-sm" onClick={()=>{ setShowModal(true); setEncounterId('') }}>New Birth Certificate</button>
+          <input
+            className="border rounded-md px-2 py-1 text-sm"
+            placeholder="Search mother / MRN / phone"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setPage(1);
+                load();
+              }
+            }}
+          />
+          <button
+            className="btn-outline-navy text-sm"
+            onClick={() => {
+              setPage(1);
+              load();
+            }}
+            disabled={loading}
+          >
+            Search
+          </button>
+          <button
+            className="btn text-sm"
+            onClick={() => {
+              setShowModal(true);
+              setEncounterId("");
+            }}
+          >
+            New Birth Certificate
+          </button>
         </div>
       </div>
 
@@ -96,24 +224,51 @@ export default function Hospital_BirthCertificateList(){
             </tr>
           </thead>
           <tbody className="text-sm">
-            {rows.map((r, i)=> (
+            {rows.map((r, i) => (
               <tr key={r._id} className="border-t">
                 <td className="px-3 py-2">{r.srNo || sr(i)}</td>
-                <td className="px-3 py-2">{(r.dateOfBirth? new Date(r.dateOfBirth).toLocaleDateString() : '') + (r.timeOfBirth? (' ' + r.timeOfBirth) : '')}</td>
-                <td className="px-3 py-2">{r.motherName||'-'}</td>
-                <td className="px-3 py-2">{r.mrNumber||'-'}</td>
-                <td className="px-3 py-2">{r.phone||'-'}</td>
+                <td className="px-3 py-2">
+                  {(r.dateOfBirth
+                    ? new Date(r.dateOfBirth).toLocaleDateString()
+                    : "") + (r.timeOfBirth ? " " + r.timeOfBirth : "")}
+                </td>
+                <td className="px-3 py-2">{r.motherName || "-"}</td>
+                <td className="px-3 py-2">{r.mrNumber || "-"}</td>
+                <td className="px-3 py-2">{r.phone || "-"}</td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">
-                    <button className="btn-outline-navy text-xs" onClick={()=> { setShowModal(true); setDocId(String(r._id)); setEncounterId('') }}>Edit</button>
-                    <button className="btn-outline-navy text-xs" onClick={()=> onDownloadPdf(String(r._id))}>Download PDF</button>
-                    <button className="btn-outline-navy text-xs" onClick={()=> onDelete(String(r._id))}>Delete</button>
+                    <button
+                      className="btn-outline-navy text-xs"
+                      onClick={() => {
+                        setShowModal(true);
+                        setDocId(String(r._id));
+                        setEncounterId("");
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn-outline-navy text-xs"
+                      onClick={() => onDownloadPdf(String(r._id))}
+                    >
+                      Download PDF
+                    </button>
+                    <button
+                      className="btn-outline-navy text-xs"
+                      onClick={() => onDelete(String(r._id))}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </td>
               </tr>
             ))}
-            {rows.length===0 && (
-              <tr><td className="px-3 py-6 text-slate-500" colSpan={6}>{loading? 'Loading...':'No records found'}</td></tr>
+            {rows.length === 0 && (
+              <tr>
+                <td className="px-3 py-6 text-slate-500" colSpan={6}>
+                  {loading ? "Loading..." : "No records found"}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -121,27 +276,177 @@ export default function Hospital_BirthCertificateList(){
 
       <div className="flex items-center justify-end gap-2 text-sm">
         <span>Rows:</span>
-        <select className="border rounded px-2 py-1" value={limit} onChange={e=>{ setLimit(parseInt(e.target.value)||20); setPage(1) }}>
-          {[10,20,50,100].map(n=> <option key={n} value={n}>{n}</option>)}
+        <select
+          className="border rounded px-2 py-1"
+          value={limit}
+          onChange={(e) => {
+            setLimit(parseInt(e.target.value) || 20);
+            setPage(1);
+          }}
+        >
+          {[10, 20, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
         </select>
-        <span>Page {page} of {Math.max(1, Math.ceil(total/limit)||1)}</span>
-        <button className="btn-outline-navy" disabled={page<=1} onClick={()=> setPage(p=>Math.max(1,p-1))}>Prev</button>
-        <button className="btn-outline-navy" disabled={page>=Math.ceil(total/limit)} onClick={()=> setPage(p=>p+1)}>Next</button>
+        <span>
+          Page {page} of {Math.max(1, Math.ceil(total / limit) || 1)}
+        </span>
+        <button
+          className="btn-outline-navy"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          Prev
+        </button>
+        <button
+          className="btn-outline-navy"
+          disabled={page >= Math.ceil(total / limit)}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </button>
       </div>
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-xl w-[95vw] max-w-4xl p-4 relative">
             <div className="absolute right-3 top-3">
-              <button className="btn-outline-navy text-xs" onClick={()=> { setShowModal(false); load() }}>Close</button>
+              <button
+                className="btn-outline-navy text-xs"
+                onClick={() => {
+                  setShowModal(false);
+                  load();
+                }}
+              >
+                Close
+              </button>
             </div>
-            <div className="text-lg font-semibold text-slate-800 mb-3">New Birth Certificate</div>
+            <div className="text-lg font-semibold text-slate-800 mb-3">
+              New Birth Certificate
+            </div>
             <div className="border rounded-md p-3">
-              <Hospital_BirthCertificateForm encounterId={encounterId} docId={docId} showPatientHeader={false} onSaved={()=> load()} />
+              <Hospital_BirthCertificateForm
+                encounterId={encounterId}
+                docId={docId}
+                showPatientHeader={false}
+                onSaved={() => load()}
+              />
             </div>
           </div>
         </div>
       )}
+
+      <Hospital_Modal open={!!infoModal} onClose={() => setInfoModal(null)}>
+        <div className="space-y-4">
+          <div className="text-lg font-semibold text-slate-800">
+            {infoModal?.title}
+          </div>
+          <div className="text-sm whitespace-pre-wrap text-slate-700">
+            {infoModal?.message}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => setInfoModal(null)} className="btn">
+              OK
+            </button>
+          </div>
+        </div>
+      </Hospital_Modal>
+
+      <Hospital_Modal
+        open={!!confirmState}
+        onClose={() => setConfirmState(null)}
+      >
+        <div className="space-y-4">
+          <div className="text-lg font-semibold text-slate-800">
+            {confirmState?.title || "Confirm"}
+          </div>
+          <div className="text-sm whitespace-pre-wrap text-slate-700">
+            {confirmState?.message || "Are you sure?"}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setConfirmState(null)}
+              className="btn-outline-navy"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                const fn = confirmState?.onConfirm;
+                setConfirmState(null);
+                try {
+                  fn?.();
+                } catch {}
+              }}
+              className="btn"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </Hospital_Modal>
+
+      <Hospital_Modal
+        open={!!pdfDoc}
+        onClose={() => {
+          if (pdfUrlRef.current) {
+            try {
+              URL.revokeObjectURL(pdfUrlRef.current);
+            } catch {}
+            pdfUrlRef.current = null;
+          }
+          setPdfDoc(null);
+        }}
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-lg font-semibold text-slate-800">
+              {pdfDoc?.title}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  try {
+                    pdfIframeRef.current?.contentWindow?.print();
+                  } catch {}
+                }}
+                className="btn-outline-navy"
+                disabled={!pdfDoc || pdfLoading}
+              >
+                Print
+              </button>
+              <button
+                onClick={() => {
+                  if (pdfUrlRef.current) {
+                    try {
+                      URL.revokeObjectURL(pdfUrlRef.current);
+                    } catch {}
+                    pdfUrlRef.current = null;
+                  }
+                  setPdfDoc(null);
+                }}
+                className="btn"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          {pdfLoading ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              Loading...
+            </div>
+          ) : (
+            <iframe
+              ref={pdfIframeRef}
+              title={pdfDoc?.title || "PDF"}
+              className="h-[75vh] w-full rounded-md border border-slate-200 bg-white"
+              src={pdfDoc?.src || ""}
+            />
+          )}
+        </div>
+      </Hospital_Modal>
     </div>
-  )
+  );
 }

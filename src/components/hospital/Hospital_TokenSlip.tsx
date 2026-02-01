@@ -1,117 +1,200 @@
-import { useEffect, useRef, useState } from 'react'
-import { hospitalApi } from '../../utils/api'
-import { QRCodeSVG } from 'qrcode.react'
+import { useEffect, useRef, useState } from "react";
+import { hospitalApi } from "../../utils/api";
+import { QRCodeSVG } from "qrcode.react";
 
 export type TokenSlipData = {
-  tokenNo: string
-  departmentName: string
-  doctorName?: string
-  patientName: string
-  phone?: string
-  age?: string
-  gender?: string
-  mrn?: string
-  guardianRel?: string
-  guardianName?: string
-  cnic?: string
-  address?: string
-  amount: number
-  discount: number
-  payable: number
-  createdAt?: string
-}
+  tokenNo: string;
+  departmentName: string;
+  doctorName?: string;
+  patientName: string;
+  phone?: string;
+  age?: string;
+  gender?: string;
+  mrn?: string;
+  guardianRel?: string;
+  guardianName?: string;
+  cnic?: string;
+  address?: string;
+  ipdBed?: string;
+  amount: number;
+  discount: number;
+  payable: number;
+  createdAt?: string;
+};
 
-let settingsCache: any | null = null
+let settingsCache: any | null = null;
 
 function getCurrentUser() {
   try {
-    const h = localStorage.getItem('hospital.session')
-    if (h) return (JSON.parse(h)?.username || JSON.parse(h)?.name || '').toString()
-  } catch { }
+    const h = localStorage.getItem("hospital.session");
+    if (h)
+      return (JSON.parse(h)?.username || JSON.parse(h)?.name || "").toString();
+  } catch {}
   try {
-    const d = localStorage.getItem('doctor.session')
-    if (d) return (JSON.parse(d)?.username || JSON.parse(d)?.name || '').toString()
-  } catch { }
-  return 'admin'
+    const d = localStorage.getItem("doctor.session");
+    if (d)
+      return (JSON.parse(d)?.username || JSON.parse(d)?.name || "").toString();
+  } catch {}
+  return "admin";
 }
 
-export default function Hospital_TokenSlip({ open, onClose, data, autoPrint = false, user, fbr }: { open: boolean; onClose: () => void; data: TokenSlipData; autoPrint?: boolean; user?: string; fbr?: { fbrInvoiceNo: string; status?: string; qrCode?: string; mode?: string; error?: string } }) {
-  const [settings, setSettings] = useState({ name: 'Hospital Name', phone: '', address: '', logoDataUrl: '', slipFooter: 'Powered by Hospital MIS' })
-  const printedRef = useRef(false)
-
-  useEffect(() => { printedRef.current = false }, [open])
+export default function Hospital_TokenSlip({
+  open,
+  onClose,
+  data,
+  autoPrint = false,
+  user,
+  fbr,
+}: {
+  open: boolean;
+  onClose: () => void;
+  data: TokenSlipData;
+  autoPrint?: boolean;
+  user?: string;
+  fbr?: {
+    fbrInvoiceNo: string;
+    status?: string;
+    qrCode?: string;
+    mode?: string;
+    error?: string;
+  };
+}) {
+  const [settings, setSettings] = useState({
+    name: "Hospital Name",
+    phone: "",
+    address: "",
+    logoDataUrl: "",
+    slipFooter: "Powered by Hospital MIS",
+  });
+  const printedRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false
+    printedRef.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function load() {
       try {
-        if (!settingsCache) settingsCache = await hospitalApi.getSettings()
+        if (!settingsCache) settingsCache = await hospitalApi.getSettings();
         if (!cancelled && settingsCache) {
-          const s: any = settingsCache
+          const s: any = settingsCache;
           setSettings({
-            name: s.name || 'Hospital Name',
-            phone: s.phone || '',
-            address: s.address || '',
-            logoDataUrl: s.logoDataUrl || '',
-            slipFooter: s.slipFooter || 'Powered by Hospital MIS',
-          })
+            name: s.name || "Hospital Name",
+            phone: s.phone || "",
+            address: s.address || "",
+            logoDataUrl: s.logoDataUrl || "",
+            slipFooter: s.slipFooter || "Powered by Hospital MIS",
+          });
         }
-      } catch { }
+      } catch {}
     }
-    if (open) load()
-    return () => { cancelled = true }
-  }, [open])
+    if (open) load();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
-    if (!open || !autoPrint || printedRef.current) return
-    const t = setTimeout(() => { window.print(); printedRef.current = true }, 300)
-    return () => clearTimeout(t)
-  }, [open, autoPrint, settings.name, settings.address, settings.phone, settings.logoDataUrl, settings.slipFooter])
+    if (!open || !autoPrint || printedRef.current) return;
+    const t = setTimeout(() => {
+      window.print();
+      printedRef.current = true;
+    }, 300);
+    return () => clearTimeout(t);
+  }, [
+    open,
+    autoPrint,
+    settings.name,
+    settings.address,
+    settings.phone,
+    settings.logoDataUrl,
+    settings.slipFooter,
+  ]);
 
-  if (!open) return null
-  const dt = data.createdAt ? new Date(data.createdAt) : new Date()
+  if (!open) return null;
+  const dt = data.createdAt ? new Date(data.createdAt) : new Date();
+  const slipTitle =
+    String(data.departmentName || "")
+      .trim()
+      .toLowerCase() === "ipd"
+      ? "IPD Token"
+      : "OPD Token";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 print:bg-white print:static">
-      <div id="hospital-receipt" className="w-[360px] rounded-md border border-slate-300 bg-white p-4 shadow print:shadow-none print:border-0 print:w-[300px]">
+      <div
+        id="hospital-receipt"
+        className="w-[360px] rounded-md border border-slate-300 bg-white p-4 shadow print:shadow-none print:border-0 print:w-[300px]"
+      >
         {/* Header */}
         <div className="text-center">
-          {settings.logoDataUrl && <img src={settings.logoDataUrl} alt="logo" className="mx-auto mb-2 h-10 w-10 object-contain" />}
-          <div className="text-lg font-extrabold leading-tight">{settings.name}</div>
-          <div className="text-xs text-slate-600 print:text-black">{settings.address}</div>
-          {settings.phone && <div className="text-xs text-slate-600 print:text-black">Mobile #: {settings.phone}</div>}
+          {settings.logoDataUrl && (
+            <img
+              src={settings.logoDataUrl}
+              alt="logo"
+              className="mx-auto mb-2 h-10 w-10 object-contain"
+            />
+          )}
+          <div className="text-lg font-extrabold leading-tight">
+            {settings.name}
+          </div>
+          <div className="text-xs text-slate-600 print:text-black">
+            {settings.address}
+          </div>
+          {settings.phone && (
+            <div className="text-xs text-slate-600 print:text-black">
+              Mobile #: {settings.phone}
+            </div>
+          )}
         </div>
 
         <hr className="my-2 border-dashed" />
 
-        <div className="text-center text-sm font-semibold underline">OPD Token</div>
+        <div className="text-center text-sm font-semibold underline">
+          {slipTitle}
+        </div>
 
         <div className="mt-2 flex flex-wrap justify-between gap-1 text-xs text-slate-700">
           <div>User: {user || getCurrentUser()}</div>
-          <div>{dt.toLocaleDateString()} {dt.toLocaleTimeString()}</div>
+          <div>
+            {dt.toLocaleDateString()} {dt.toLocaleTimeString()}
+          </div>
         </div>
 
         <hr className="my-2 border-dashed" />
 
         <div className="space-y-1 text-sm text-slate-800">
-          <Row label="Doctor Name:" value={data.doctorName || '-'} />
-          <Row label="Department:" value={data.departmentName || '-'} />
-          <Row label="Patient Name:" value={data.patientName || '-'} />
-          <Row label="Mobile #:" value={data.phone || '-'} boldValue />
+          <Row label="Doctor Name:" value={data.doctorName || "-"} />
+          <Row label="Department:" value={data.departmentName || "-"} />
+          {data.ipdBed && <Row label="Bed:" value={data.ipdBed} />}
+          <Row label="Patient Name:" value={data.patientName || "-"} />
+          <Row label="Mobile #:" value={data.phone || "-"} boldValue />
           {data.mrn && <Row label="MR #:" value={data.mrn} />}
           {data.age && <Row label="Age:" value={data.age} />}
           {data.gender && <Row label="Sex:" value={data.gender} />}
-          {(data.guardianName || data.guardianRel) && <Row label="Guardian:" value={`${data.guardianRel ? data.guardianRel + ' ' : ''}${data.guardianName || ''}`.trim()} />}
+          {(data.guardianName || data.guardianRel) && (
+            <Row
+              label="Guardian:"
+              value={`${data.guardianRel ? data.guardianRel + " " : ""}${data.guardianName || ""}`.trim()}
+            />
+          )}
           {data.cnic && <Row label="CNIC:" value={data.cnic} />}
           {data.address && <Row label="Address:" value={data.address} />}
         </div>
 
-        <div className="my-3 rounded border border-slate-800 p-3 text-center text-xl font-extrabold tracking-widest">{data.tokenNo}</div>
+        <div className="my-3 rounded border border-slate-800 p-3 text-center text-xl font-extrabold tracking-widest">
+          {data.tokenNo}
+        </div>
 
         <div className="space-y-1 text-sm text-slate-800">
           <Row label="Total Amount:" value={data.amount.toFixed(2)} />
           <Row label="Discount:" value={(data.discount || 0).toFixed(2)} />
-          <Row label="Payable Amount:" value={data.payable.toFixed(2)} boldValue />
+          <Row
+            label="Payable Amount:"
+            value={data.payable.toFixed(2)}
+            boldValue
+          />
         </div>
 
         {fbr?.fbrInvoiceNo ? (
@@ -119,7 +202,8 @@ export default function Hospital_TokenSlip({ open, onClose, data, autoPrint = fa
             <hr className="my-2 border-dashed" />
             <div className="text-center text-xs text-slate-700">
               <div>
-                <span className="font-semibold">FBR Invoice:</span> {fbr.fbrInvoiceNo} {fbr.status ? `(${fbr.status})` : ''}
+                <span className="font-semibold">FBR Invoice:</span>{" "}
+                {fbr.fbrInvoiceNo} {fbr.status ? `(${fbr.status})` : ""}
               </div>
               {/* Generate QR Code with all FBR required fields */}
               <div className="mt-2 flex flex-col items-center gap-1">
@@ -129,13 +213,21 @@ export default function Hospital_TokenSlip({ open, onClose, data, autoPrint = fa
                   level="M"
                   includeMargin={false}
                 />
-                <div className="text-[11px] text-slate-600">Scan to verify FBR invoice</div>
+                <div className="text-[11px] text-slate-600">
+                  Scan to verify FBR invoice
+                </div>
               </div>
-              {String(fbr.mode || '').toUpperCase() === 'SANDBOX' ? (
-                <div className="mt-1 text-[11px] text-amber-700">⚠ Sandbox mode</div>
+              {String(fbr.mode || "").toUpperCase() === "SANDBOX" ? (
+                <div className="mt-1 text-[11px] text-amber-700">
+                  ⚠ Sandbox mode
+                </div>
               ) : null}
-              {String(fbr.status || '').toUpperCase() === 'FAILED' ? (
-                <div className="mt-1 text-[11px] font-semibold text-rose-600">{fbr.error ? String(fbr.error) : 'FBR invoice submission failed'}</div>
+              {String(fbr.status || "").toUpperCase() === "FAILED" ? (
+                <div className="mt-1 text-[11px] font-semibold text-rose-600">
+                  {fbr.error
+                    ? String(fbr.error)
+                    : "FBR invoice submission failed"}
+                </div>
               ) : null}
             </div>
           </>
@@ -143,11 +235,23 @@ export default function Hospital_TokenSlip({ open, onClose, data, autoPrint = fa
 
         <hr className="my-2 border-dashed" />
 
-        <div className="text-center text-[11px] text-slate-600">{settings.slipFooter || 'Powered by Hospital MIS'}</div>
+        <div className="text-center text-[11px] text-slate-600">
+          {settings.slipFooter || "Powered by Hospital MIS"}
+        </div>
 
         <div className="mt-3 flex items-center justify-end gap-2 print:hidden">
-          <button onClick={() => window.print()} className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white">Print</button>
-          <button onClick={onClose} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs">Close</button>
+          <button
+            onClick={() => window.print()}
+            className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            Print
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs"
+          >
+            Close
+          </button>
         </div>
       </div>
 
@@ -172,14 +276,26 @@ export default function Hospital_TokenSlip({ open, onClose, data, autoPrint = fa
         }
       `}</style>
     </div>
-  )
+  );
 }
 
-function Row({ label, value, boldValue }: { label: string; value: string; boldValue?: boolean }) {
+function Row({
+  label,
+  value,
+  boldValue,
+}: {
+  label: string;
+  value: string;
+  boldValue?: boolean;
+}) {
   return (
     <div className="grid grid-cols-[110px_1fr] gap-2">
       <div className="text-slate-700">{label}</div>
-      <div className={`${boldValue ? 'font-semibold ' : ''}row-value min-w-0 wrap-break-word text-right`}>{value}</div>
+      <div
+        className={`${boldValue ? "font-semibold " : ""}row-value min-w-0 wrap-break-word text-right`}
+      >
+        {value}
+      </div>
     </div>
-  )
+  );
 }

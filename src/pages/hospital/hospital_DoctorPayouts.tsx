@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { hospitalApi, financeApi } from "../../utils/api";
+import Hospital_Modal from "../../components/hospital/bed-management/Hospital_Modal";
 
 export default function Finance_DoctorPayouts() {
   const [doctors, setDoctors] = useState<Array<{ id: string; name: string }>>(
@@ -23,6 +24,21 @@ export default function Finance_DoctorPayouts() {
   const [printLabel, setPrintLabel] = useState("");
   const [printing, setPrinting] = useState(false);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  const [modal, setModal] = useState<{
+    open: boolean;
+    title?: string;
+    message?: string;
+    type?: "info" | "error" | "success";
+  }>({ open: false });
+
+  function showModal(
+    title: string,
+    message: string,
+    type: "info" | "error" | "success" = "info",
+  ) {
+    setModal({ open: true, title, message, type });
+  }
 
   useEffect(() => {
     loadDoctors();
@@ -180,9 +196,9 @@ export default function Finance_DoctorPayouts() {
       setAmount("");
       setMemo("");
       setTick((t) => t + 1);
-      alert("Payout recorded");
+      showModal("Success", "Payout recorded", "success");
     } catch (e: any) {
-      alert(e?.message || "Failed to record payout");
+      showModal("Error", e?.message || "Failed to record payout", "error");
     } finally {
       setLoading(false);
     }
@@ -378,6 +394,22 @@ export default function Finance_DoctorPayouts() {
             </div>
           </div>
         </div>
+      )}
+
+      {modal.open && (
+        <Hospital_Modal
+          open={modal.open}
+          onClose={() => setModal({ open: false })}
+        >
+          <div className="text-lg font-semibold text-slate-900 mb-2">
+            {modal.title}
+          </div>
+          <div
+            className={`p-4 ${modal.type === "error" ? "text-red-600" : modal.type === "success" ? "text-green-600" : "text-slate-700"}`}
+          >
+            {modal.message}
+          </div>
+        </Hospital_Modal>
       )}
     </div>
   );

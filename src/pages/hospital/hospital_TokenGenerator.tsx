@@ -4,6 +4,7 @@ import { hospitalApi } from "../../utils/api";
 import Hospital_TokenSlip, {
   type TokenSlipData,
 } from "../../components/hospital/Hospital_TokenSlip";
+import Hospital_Modal from "../../components/hospital/bed-management/Hospital_Modal";
 
 export default function Hospital_TokenGenerator() {
   const [departments, setDepartments] = useState<
@@ -241,10 +242,29 @@ export default function Hospital_TokenGenerator() {
     type: "success" | "error";
     message: string;
   }>(null);
+  const [modal, setModal] = useState<null | {
+    title: string;
+    message: string;
+  }>(null);
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 2500);
   };
+  const showModal = (title: string, message: string) =>
+    setModal({ title, message });
+
+  const [activeSearch, setActiveSearch] = useState<
+    null | "phone" | "mrn" | "name"
+  >(null);
+
+  const [mrMatches, setMrMatches] = useState<any[]>([]);
+  const [mrOpen, setMrOpen] = useState(false);
+  const [mrHL, setMrHL] = useState(-1);
+  const mrRef = useRef<HTMLInputElement>(null);
+
+  const [nameMatches, setNameMatches] = useState<any[]>([]);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameHL, setNameHL] = useState(-1);
 
   async function onMrnKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
@@ -354,12 +374,22 @@ export default function Hospital_TokenGenerator() {
         cnic: p.cnicNormalized || prev.cnic,
       }));
       const digits = String(p.phoneNormalized || "").replace(/\D+/g, "");
-      const nm = String(p.fullName || "").trim().toLowerCase().replace(/\s+/g, " ");
+      const nm = String(p.fullName || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
       skipLookupKeyRef.current = `${digits}|${nm}`;
     } finally {
       setPhoneOpen(false);
       setPhoneMatches([]);
       setPhoneHL(-1);
+      setMrOpen(false);
+      setMrMatches([]);
+      setMrHL(-1);
+      setNameOpen(false);
+      setNameMatches([]);
+      setNameHL(-1);
+      setActiveSearch(null);
       setTimeout(() => nameRef.current?.focus(), 0);
     }
   }
@@ -371,11 +401,14 @@ export default function Hospital_TokenGenerator() {
 
   useEffect(() => {
     const digits = (form.phone || "").replace(/\D+/g, "");
-    if (digits.length >= 6) {
+    if (activeSearch === "phone" && digits.length >= 1) {
       setPhoneOpen(true);
       const t = setTimeout(async () => {
         try {
-          const r: any = await hospitalApi.searchPatients({ phone: digits, limit: 7 });
+          const r: any = await hospitalApi.searchPatients({
+            phone: digits,
+            limit: 7,
+          });
           setPhoneMatches(Array.isArray(r?.patients) ? r.patients : []);
         } catch {
           setPhoneMatches([]);
@@ -387,7 +420,53 @@ export default function Hospital_TokenGenerator() {
       setPhoneOpen(false);
       setPhoneHL(-1);
     }
-  }, [form.phone]);
+  }, [form.phone, activeSearch]);
+
+  useEffect(() => {
+    const mr = (form.mrNumber || "").trim();
+    if (activeSearch === "mrn" && mr.length >= 1) {
+      setMrOpen(true);
+      const t = setTimeout(async () => {
+        try {
+          const r: any = await hospitalApi.searchPatients({
+            mrn: mr,
+            limit: 7,
+          });
+          setMrMatches(Array.isArray(r?.patients) ? r.patients : []);
+        } catch {
+          setMrMatches([]);
+        }
+      }, 200);
+      return () => clearTimeout(t);
+    } else {
+      setMrMatches([]);
+      setMrOpen(false);
+      setMrHL(-1);
+    }
+  }, [form.mrNumber, activeSearch]);
+
+  useEffect(() => {
+    const nm = (form.patientName || "").trim();
+    if (activeSearch === "name" && nm.length >= 1) {
+      setNameOpen(true);
+      const t = setTimeout(async () => {
+        try {
+          const r: any = await hospitalApi.searchPatients({
+            name: nm,
+            limit: 7,
+          });
+          setNameMatches(Array.isArray(r?.patients) ? r.patients : []);
+        } catch {
+          setNameMatches([]);
+        }
+      }, 200);
+      return () => clearTimeout(t);
+    } else {
+      setNameMatches([]);
+      setNameOpen(false);
+      setNameHL(-1);
+    }
+  }, [form.patientName, activeSearch]);
 
   const generateToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -396,14 +475,20 @@ export default function Hospital_TokenGenerator() {
       (d) => String(d.id) === String(form.departmentId),
     );
     if (!form.departmentId) {
-      alert("Please select a department before generating a token");
+      showModal(
+        "Missing Department",
+        "Please select a department before generating a token",
+      );
       return;
     }
 
     const digitsOnly = (s: string) => (s || "").replace(/\D+/g, "");
     const phoneDigits = digitsOnly(form.phone);
     if (phoneDigits && phoneDigits.length !== 11) {
-      alert("Phone number must be 11 digits (e.g. 03XXXXXXXXX)");
+      showModal(
+        "Invalid Phone",
+        "Phone number must be 11 digits (e.g. 03XXXXXXXXX)",
+      );
       return;
     }
     // CNIC can be any length/format; no strict 13-digit validation
@@ -411,7 +496,7 @@ export default function Hospital_TokenGenerator() {
       // Inline IPD admit flow: if department is IPD, require bed and admit immediately
       if (isIPD) {
         if (!ipdBedId) {
-          alert("Please select a bed for IPD admission");
+          showModal("Missing Bed", "Please select a bed for IPD admission");
           return;
         }
         const payload: any = {
@@ -436,6 +521,11 @@ export default function Hospital_TokenGenerator() {
         const rawDeposit = String(ipdDeposit || "").trim();
         const cleanedDeposit = rawDeposit.replace(/[^0-9.]/g, "");
         const depAmt = cleanedDeposit ? parseFloat(cleanedDeposit) : NaN;
+        const ipdDiscount = Number(form.discount) || 0;
+        const ipdPayable = Math.max(
+          (isNaN(depAmt) ? 0 : depAmt) - ipdDiscount,
+          0,
+        );
         const res = (await hospitalApi.createOpdToken({
           ...payload,
           overrideFee: isNaN(depAmt) ? undefined : depAmt,
@@ -451,6 +541,8 @@ export default function Hospital_TokenGenerator() {
         // Show print slip with full details
         const slipMrn =
           res?.token?.patientId?.mrn || res?.token?.mrn || form.mrNumber || "";
+        const bedLabel =
+          ipdBeds.find((b) => String(b._id) === String(ipdBedId))?.label || "";
         const slip: TokenSlipData = {
           tokenNo: res?.token?.tokenNo || "N/A",
           departmentName:
@@ -459,6 +551,7 @@ export default function Hospital_TokenGenerator() {
           doctorName:
             doctors.find((d) => String(d.id) === String(form.doctor))?.name ||
             "-",
+          ipdBed: bedLabel || undefined,
           patientName: res?.token?.patientName || form.patientName || "-",
           phone: form.phone || "",
           mrn: slipMrn,
@@ -469,8 +562,8 @@ export default function Hospital_TokenGenerator() {
           cnic: form.cnic || "",
           address: form.address || "",
           amount: isNaN(depAmt) ? 0 : depAmt,
-          discount: 0,
-          payable: isNaN(depAmt) ? 0 : depAmt,
+          discount: ipdDiscount,
+          payable: ipdPayable,
           createdAt: res?.token?.createdAt,
         };
         setSlipData(slip);
@@ -544,7 +637,7 @@ export default function Hospital_TokenGenerator() {
         `patient=${form.patientName || "N/A"}, dept=${form.departmentId}, doctor=${selDoc?.name || "N/A"}, fee=${res?.pricing?.finalFee ?? finalFee}`,
       );
     } catch (err: any) {
-      alert(err?.message || "Failed to generate token");
+      showModal("Failed", err?.message || "Failed to generate token");
     }
     reset();
   };
@@ -564,94 +657,221 @@ export default function Hospital_TokenGenerator() {
                   Phone
                 </label>
                 <div className="relative">
-                <input
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
-                  placeholder="Enter 11-digit phone"
-                  value={form.phone}
-                  onChange={(e) => {
-                    update("phone", e.target.value);
-                    skipLookupKeyRef.current = null;
-                    lastPromptKeyRef.current = null;
-                    const d = e.target.value.replace(/\D+/g, "");
-                    if (d.length < 6) {
-                      setPhoneOpen(false);
-                      setPhoneMatches([]);
-                      setPhoneHL(-1);
-                    }
-                  }}
-                  onBlur={onPhoneBlurWrapped}
-                  onKeyDown={(e) => {
-                    if (!phoneOpen || !phoneMatches.length) return;
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setPhoneHL((i) => Math.min(phoneMatches.length - 1, i + 1));
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setPhoneHL((i) => Math.max(-1, i - 1));
-                    } else if (e.key === "Enter") {
-                      if (phoneHL >= 0 && phoneHL < phoneMatches.length) {
-                        e.preventDefault();
-                        selectPhoneSuggestion(phoneMatches[phoneHL]);
+                  <input
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                    placeholder="Enter 11-digit phone"
+                    value={form.phone}
+                    onChange={(e) => {
+                      update("phone", e.target.value);
+                      setActiveSearch("phone");
+                      skipLookupKeyRef.current = null;
+                      lastPromptKeyRef.current = null;
+                      const d = e.target.value.replace(/\D+/g, "");
+                      if (d.length < 1) {
+                        setPhoneOpen(false);
+                        setPhoneMatches([]);
+                        setPhoneHL(-1);
                       }
-                    } else if (e.key === "Escape") {
-                      setPhoneOpen(false);
-                    }
-                  }}
-                  ref={phoneRef}
-                />
-                {phoneOpen && phoneMatches.length > 0 && (
-                  <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow">
-                    {phoneMatches.map((p, idx) => (
-                      <div
-                        key={p._id || idx}
-                        className={`cursor-pointer px-3 py-2 text-sm ${idx === phoneHL ? "bg-violet-50" : ""}`}
-                        onMouseDown={(e) => {
+                    }}
+                    onFocus={() => setActiveSearch("phone")}
+                    onBlur={onPhoneBlurWrapped}
+                    onKeyDown={(e) => {
+                      if (!phoneOpen || !phoneMatches.length) return;
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setPhoneHL((i) =>
+                          Math.min(phoneMatches.length - 1, i + 1),
+                        );
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setPhoneHL((i) => Math.max(-1, i - 1));
+                      } else if (e.key === "Enter") {
+                        if (phoneHL >= 0 && phoneHL < phoneMatches.length) {
                           e.preventDefault();
-                          selectPhoneSuggestion(p);
-                        }}
-                        onMouseEnter={() => setPhoneHL(idx)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="min-w-0 truncate font-medium text-slate-800">{p.fullName || "-"}</div>
-                          <div className="shrink-0 text-xs text-slate-500">{p.mrn || "-"}</div>
+                          selectPhoneSuggestion(phoneMatches[phoneHL]);
+                        }
+                      } else if (e.key === "Escape") {
+                        setPhoneOpen(false);
+                      }
+                    }}
+                    ref={phoneRef}
+                  />
+                  {phoneOpen && phoneMatches.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow">
+                      {phoneMatches.map((p, idx) => (
+                        <div
+                          key={p._id || idx}
+                          className={`cursor-pointer px-3 py-2 text-sm ${idx === phoneHL ? "bg-violet-50" : ""}`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectPhoneSuggestion(p);
+                          }}
+                          onMouseEnter={() => setPhoneHL(idx)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="min-w-0 truncate font-medium text-slate-800">
+                              {p.fullName || "-"}
+                            </div>
+                            <div className="shrink-0 text-xs text-slate-500">
+                              {p.mrn || "-"}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {p.phoneNormalized || ""}{" "}
+                            {p.address ? `• ${p.address}` : ""}
+                          </div>
                         </div>
-                        <div className="text-xs text-slate-500">
-                          {(p.phoneNormalized || "")} {p.address ? `• ${p.address}` : ""}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="md:col-span-2">
                 <label className="mb-1 block text-sm font-medium text-slate-700">
                   Patient Name
                 </label>
-                <input
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
-                  placeholder="Full Name"
-                  value={form.patientName}
-                  onChange={(e) => {
-                    update("patientName", e.target.value);
-                    skipLookupKeyRef.current = null;
-                    lastPromptKeyRef.current = null;
-                  }}
-                  onBlur={() => lookupExistingByPhoneAndName("name")}
-                  ref={nameRef}
-                />
+                <div className="relative">
+                  <input
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                    placeholder="Full Name"
+                    value={form.patientName}
+                    onChange={(e) => {
+                      update("patientName", e.target.value);
+                      setActiveSearch("name");
+                      skipLookupKeyRef.current = null;
+                      lastPromptKeyRef.current = null;
+                    }}
+                    onFocus={() => setActiveSearch("name")}
+                    onBlur={() => {
+                      lookupExistingByPhoneAndName("name");
+                      setTimeout(() => setNameOpen(false), 100);
+                      setTimeout(() => setActiveSearch(null), 120);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!nameOpen || !nameMatches.length) return;
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setNameHL((i) =>
+                          Math.min(nameMatches.length - 1, i + 1),
+                        );
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setNameHL((i) => Math.max(-1, i - 1));
+                      } else if (e.key === "Enter") {
+                        if (nameHL >= 0 && nameHL < nameMatches.length) {
+                          e.preventDefault();
+                          selectPhoneSuggestion(nameMatches[nameHL]);
+                        }
+                      } else if (e.key === "Escape") {
+                        setNameOpen(false);
+                      }
+                    }}
+                    ref={nameRef}
+                  />
+                  {nameOpen && nameMatches.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow">
+                      {nameMatches.map((p, idx) => (
+                        <div
+                          key={p._id || idx}
+                          className={`cursor-pointer px-3 py-2 text-sm ${idx === nameHL ? "bg-violet-50" : ""}`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectPhoneSuggestion(p);
+                          }}
+                          onMouseEnter={() => setNameHL(idx)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="min-w-0 truncate font-medium text-slate-800">
+                              {p.fullName || "-"}
+                            </div>
+                            <div className="shrink-0 text-xs text-slate-500">
+                              {p.mrn || "-"}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {p.phoneNormalized || ""}{" "}
+                            {p.address ? `• ${p.address}` : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="mb-1 block text-sm font-medium text-slate-700">
                   Search by MR Number
                 </label>
-                <input
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
-                  placeholder="Enter MR# (e.g., MR-15)"
-                  value={form.mrNumber}
-                  onChange={(e) => update("mrNumber", e.target.value)}
-                  onKeyDown={onMrnKeyDown}
-                />
+                <div className="relative">
+                  <input
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                    placeholder="Enter MR# (e.g., MR-15)"
+                    value={form.mrNumber}
+                    onChange={(e) => {
+                      update("mrNumber", e.target.value);
+                      setActiveSearch("mrn");
+                    }}
+                    onFocus={() => setActiveSearch("mrn")}
+                    onBlur={() => {
+                      setTimeout(() => setMrOpen(false), 100);
+                      setTimeout(() => setActiveSearch(null), 120);
+                    }}
+                    onKeyDown={(e) => {
+                      if (mrOpen && mrMatches.length) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setMrHL((i) => Math.min(mrMatches.length - 1, i + 1));
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setMrHL((i) => Math.max(-1, i - 1));
+                          return;
+                        }
+                        if (e.key === "Enter") {
+                          if (mrHL >= 0 && mrHL < mrMatches.length) {
+                            e.preventDefault();
+                            selectPhoneSuggestion(mrMatches[mrHL]);
+                            return;
+                          }
+                        }
+                        if (e.key === "Escape") {
+                          setMrOpen(false);
+                          return;
+                        }
+                      }
+                      onMrnKeyDown(e);
+                    }}
+                    ref={mrRef}
+                  />
+                  {mrOpen && mrMatches.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow">
+                      {mrMatches.map((p, idx) => (
+                        <div
+                          key={p._id || idx}
+                          className={`cursor-pointer px-3 py-2 text-sm ${idx === mrHL ? "bg-violet-50" : ""}`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectPhoneSuggestion(p);
+                          }}
+                          onMouseEnter={() => setMrHL(idx)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="min-w-0 truncate font-medium text-slate-800">
+                              {p.mrn || "-"}
+                            </div>
+                            <div className="shrink-0 text-xs text-slate-500">
+                              {p.phoneNormalized || ""}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {p.fullName || "-"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -1004,6 +1224,22 @@ export default function Hospital_TokenGenerator() {
           {toast.message}
         </div>
       )}
+
+      <Hospital_Modal open={!!modal} onClose={() => setModal(null)}>
+        <div className="space-y-4">
+          <div className="text-lg font-semibold text-slate-800">
+            {modal?.title}
+          </div>
+          <div className="text-sm whitespace-pre-wrap text-slate-700">
+            {modal?.message}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => setModal(null)} className="btn">
+              OK
+            </button>
+          </div>
+        </div>
+      </Hospital_Modal>
     </div>
   );
 }

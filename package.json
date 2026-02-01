@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:front": "vite build",
     "build:backend": "npm --prefix backend run build",
+    "build:all": "npm run build:front && npm run build:backend",
     "make:ico": "node ./scripts/make-ico.mjs",
     "dist:win": "npm run make:ico && npm run build:front && npm run build:backend && electron-builder -w",
     "dist:mac": "npm run build:front && npm run build:backend && electron-builder -m",
